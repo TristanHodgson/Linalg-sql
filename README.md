@@ -1,10 +1,6 @@
 # Matrix Tools in PostgreSQL
 
-This project shows how to store, validate, and display matrices inside PostgreSQL using SQL and PL/pgSQL. It includes:
-
-- A script to create and populate a matrix table  
-- A function to check whether a matrix is valid  
-- A function to visualise matrix rows as text
+This project shows how to store, validate, and display matrices inside PostgreSQL using SQL and PL/pgSQL.
 
 ---
 
@@ -13,9 +9,11 @@ This project shows how to store, validate, and display matrices inside PostgreSQ
 | File | Description |
 |------|-------------|
 | **0create.sql** | Creates table `A` and inserts a sample matrix |
-| **1check.sql** | Defines `mat_check(text)` to verify matrix completeness and index correctness. |
-| **2visualise.sql** | Defines `mat_vis(text)` to print each matrix row as a text string. |
-| **3multiply.sql** | Defines `mat_mul(text, text, text)` to multiply two matrices and put their product in a new table |
+| **1check.sql** | Defines `mat_check(text)` to verify matrix completeness and index correctness |
+| **2visualise.sql** | Defines `mat_vis(text)` to print each matrix row as a text string |
+| **3multiply.sql** | Defines `mat_mul(text, text, text)` and `elm_mul(...)` for matrix multiplication |
+| **4pow.sql** | Defines `mat_pow(text, text, int)` to compute matrix powers |
+| **5fib.sql** | Defines `fib(int)` using fast matrix exponentiation |
 
 ---
 
@@ -25,11 +23,12 @@ Run the scripts in order:
 
 ```bash
 createdb linalg
-psql -U postgres -d linalg -f .\0create.sql
-psql -U postgres -d linalg -f .\1check.sql
-psql -U postgres -d linalg -f .\2visualise.sql
-psql -U postgres -d linalg -f .\3multiply.sql
-
+psql -U postgres -d linalg -f ./0create.sql
+psql -U postgres -d linalg -f ./1check.sql
+psql -U postgres -d linalg -f ./2visualise.sql
+psql -U postgres -d linalg -f ./3multiply.sql
+psql -U postgres -d linalg -f ./4pow.sql
+psql -U postgres -d linalg -f ./5fib.sql
 ```
 
 ---
@@ -38,7 +37,7 @@ psql -U postgres -d linalg -f .\3multiply.sql
 
 ## Create the matrix
 
-We represent matrices as tables of the form $(i, j, A_{ij})$ so each row is an entry of a table. We therefore expect $n\times m$ entries $\forall A \in \mathbb R^{n\times m}$.
+We represent matrices as tables of the form $(i, j, A_{ij})$ so each row is an entry of a table.
 
 ### Validate the matrix
 
@@ -46,12 +45,12 @@ We represent matrices as tables of the form $(i, j, A_{ij})$ so each row is an e
 SELECT mat_check('a');
 ```
 
-This checks that:
+Checks that:
 
 - Indices start at 1  
 - All entries exist  
-- No NULL values appear  
-- The matrix is rectangular  
+- No NULL values  
+- Matrix is rectangular  
 
 ### Visualise the matrix
 
@@ -59,7 +58,7 @@ This checks that:
 SELECT * FROM mat_vis('a');
 ```
 
-You will get output such as:
+Example output:
 
 ```
 1 | 1 0 0
@@ -73,4 +72,29 @@ You will get output such as:
 SELECT mat_mul('a','b','c');
 ```
 
-$$C=AB$$
+Computes $C=AB$.
+
+### Matrix Power
+
+```sql
+SELECT mat_pow('a','a_pow_5', 5);
+```
+
+Computes $A^5$ using repeated multiplication (yes this is a bad way of doing it).
+
+### Fibonacci via Matrix Exponentiation
+
+```sql
+SELECT fib(10);
+```
+
+This uses the matrix identity:
+
+$$
+\begin{pmatrix}1 & 1 \\ 1 & 0\end{pmatrix}^{n-1}
+\begin{pmatrix}1 \\ 1\end{pmatrix}
+=
+\begin{pmatrix}F_n \\ F_{n-1}\end{pmatrix}
+$$
+
+
