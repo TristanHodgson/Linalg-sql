@@ -33,6 +33,10 @@ psql -U postgres -d linalg -f ./2visualise.sql
 
 ## Usage
 
+## Create the matrix
+
+We represent matrices as tables of the form $(i, j, A_{ij})$ so each row is an entry of a table. We therefore expect $n\times m$ entries $\forall A \in \mathbb R^{n\times m}$.
+
 ### Validate the matrix
 
 ```sql
