@@ -12,9 +12,10 @@ This project shows how to store, validate, and display matrices inside PostgreSQ
 
 | File | Description |
 |------|-------------|
-| **0create.sql** | Creates table `A` and inserts a sample 3×3 identity matrix. |
+| **0create.sql** | Creates table `A` and inserts a sample matrix |
 | **1check.sql** | Defines `mat_check(text)` to verify matrix completeness and index correctness. |
 | **2visualise.sql** | Defines `mat_vis(text)` to print each matrix row as a text string. |
+| **3multiply.sql** | Defines `mat_mul(text, text, text)` to multiply two matrices and put their product in a new table |
 
 ---
 
@@ -24,9 +25,11 @@ Run the scripts in order:
 
 ```bash
 createdb linalg
-psql -U postgres -d linalg -f ./0create.sql
-psql -U postgres -d linalg -f ./1check.sql
-psql -U postgres -d linalg -f ./2visualise.sql
+psql -U postgres -d linalg -f .\0create.sql
+psql -U postgres -d linalg -f .\1check.sql
+psql -U postgres -d linalg -f .\2visualise.sql
+psql -U postgres -d linalg -f .\3multiply.sql
+
 ```
 
 ---
@@ -63,3 +66,11 @@ You will get output such as:
 2 | 0 1 0
 3 | 0 0 1
 ```
+
+### Multiplication
+
+```sql
+SELECT mat_mul('a','b','c');
+```
+
+$$C=AB$$
