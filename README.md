@@ -90,11 +90,6 @@ SELECT fib(10);
 
 This uses the matrix identity:
 
-$$
-\begin{pmatrix}1 & 1 \\ 1 & 0\end{pmatrix}^{n-1}
-\begin{pmatrix}1 \\ 1\end{pmatrix}
-=
-\begin{pmatrix}F_n \\ F_{n-1}\end{pmatrix}
-$$
+$$\begin{pmatrix}1 & 1 \\ 1 & 0\end{pmatrix}^{n-1} \begin{pmatrix}1 \\ 1\end{pmatrix}=\begin{pmatrix}F_n \\ F_{n-1}\end{pmatrix}$$
 
 
