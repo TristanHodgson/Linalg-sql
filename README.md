@@ -2,6 +2,13 @@
 
 This project shows how to store, validate, and display matrices inside PostgreSQL using SQL and PL/pgSQL.
 
+## Why?
+
+The alternative to this kind of analysis would be to use SQL purely to pull the data out into another language (e.g. Python) where we could do the matrix operations. In many situations this will be the best approach as other languages are better set up for matrix operations, however there are definitely cases where this would not be ideal. 
+* Slow connection speed between the Postgres server and the device
+* Very large matrices, for example if using a Markov chain based Page Rank algorithm it may be too slow to pull the data about all internet links into Python (and we likely don't have enough RAM)
+
+
 ---
 
 ## Project Files
