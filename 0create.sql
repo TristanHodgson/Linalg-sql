@@ -1,3 +1,7 @@
+SET work_mem = '2GB';
+SET maintenance_work_mem = '2GB';
+
+
 DROP TABLE IF EXISTS A;
 
 CREATE TABLE A (

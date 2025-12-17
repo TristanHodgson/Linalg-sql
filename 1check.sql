@@ -1,3 +1,5 @@
+-- Note this function only works for dense matrices
+
 DROP FUNCTION IF EXISTS mat_check(text);
 
 CREATE OR REPLACE FUNCTION mat_check(tab text)
