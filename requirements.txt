@@ -1,0 +1,6 @@
+psycopg2-binary
+sqlalchemy
+python-dotenv
+ipykernel
+numpy
+matplotlib
