@@ -1,0 +1,65 @@
+%opening
+
+\usepackage{geometry}
+    \geometry{
+    a4paper,
+    left=25mm,
+    top=25mm,
+    right=25mm,
+    bottom=25mm,
+}
+
+\usepackage{titlesec}
+
+\titleformat{\section}{\rmfamily\large\bfseries}{\thesection}{1em}{}[{\titlerule[0.8pt]}]
+
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=blue,
+}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{gensymb}
+
+\usepackage{float}
+
+\usepackage{graphicx}
+\usepackage{multicol}
+\setlength{\columnsep}{1cm}
+
+
+\usepackage{setspace}
+
+\usepackage{hyperref}
+
+
+\usepackage{listings}
+
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{teal},
+  stepnumber=1,
+  numbersep=8pt,
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=4,
+}
+\lstdefinelanguage{SQL}{
+  keywords={
+    SELECT, FROM, WHERE, JOIN, ON, GROUP, BY, AS,
+    CREATE, TABLE, SUM
+  },
+  sensitive=false,
+  morecomment=[l]{--},
+  morestring=[b]'
+}

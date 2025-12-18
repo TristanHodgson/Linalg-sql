@@ -1,4 +1,4 @@
--- Note this function only works for dense matrices
+-- Note this function assumes dense matrices or at least matrices without assumed 0s
 
 DROP FUNCTION IF EXISTS mat_check(text);
 
