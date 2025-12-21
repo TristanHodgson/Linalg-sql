@@ -16,17 +16,26 @@ We benchmark matrix multiplication performed entirely inside PostgreSQL against 
 
 \section{Introduction}
 
-Matrices are very common in modern mathematics and due to this ubiquity and general usefulness they are very frequently stored in relational databases such as Postgres. One of the most common operations on matrices is multiplication. A first approach to multiplying matrices stored in a database would be to pull the data into a programming language such as Python where we can use highly optimised libraries to multiply the matrices quickly, and then write the result back into the database.
+Both matrices and relational databases are ubiquities in many applications such as data science and graph theory. In these cases we often need to multiply matrices stored in such databases. In this paper we attempt to describe when it is better to do multiplication of matrices in SQL compared to a more traditional approach using a programming language like Python.
 
-In this project, we develop an alternative: multiplying the matrices entirely inside of SQL. We then proceed to benchmark this SQL only approach against the more traditional NumPy/Python approach. We anticipate that this might be faster for some matrices since we don't have to export all of the data from SQL into Python and then back again. We also investigate how slow internet speeds could affect these results.
+We anticipate that the more traditional approach may be advantageous for some matrices due to the ability to leverage highly optimised libraries such as NumPy. However, some matrices may benefit from the SQL approach as we do not have to export all of our data from the database into Python and then back again. We also investigate how a slow internet connection (between the server and client) may affect the relative speed of each approach.
+
+Our findings apply to the case where
+\begin{itemize}
+    \item Our matrices are stored in an SQL database to begin with
+    \item We want the product of two matrices to be stored in the SQL database after it has been calculated
+\end{itemize}
+
+
 
 \section{Methodology}
 
 \paragraph{Matrix storage}We store each matrix in a new table. Each row of the table has three columns $(i:INT, j:INT, value:DOUBLE)$. For simplicity, we store \emph{all} entries of the matrix explicitly, including zeros (i.e.\ there are no implied 0s). This encoding is convenient but means the amount of data stored and transferred is independent of how sparse the matrix is.
 
-\paragraph{Matrix generation}For each benchmark setting we generate matrices in NumPy by sampling i.i.d.\ entries from a uniform distribution on $[0,1)$. We then apply an elementwise Bernoulli mask with parameter $d$ (the \emph{nonzero proportion}): each entry is kept with probability $d$ and set to $0$ otherwise. All entries, including zeros created by masking, are inserted into the database under the storage scheme above. For a fixed $d$, we generate two matrices at the maximum size used in the experiment and obtain smaller $n\times n$ matrices by truncating to the top-left $n\times n$ block.
+\paragraph{Matrix generation}For each benchmark setting we generate matrices in NumPy by sampling i.i.d.\ entries from a uniform distribution on $[0,1)$. We then apply an elementwise Bernoulli mask with parameter $d$ (the \emph{non-zero proportion}), each entry is kept with probability $d$ and set to $0$ otherwise. To increase speed we only randomly generate the largest size matrix and then truncate it to the top left corner as we need smaller matrices. Using this approach we need only generate new matrices for each repeat of the experiment and for each density.
 
-\paragraph{SQL Multiplication} Matrix multiplication can naturally be written as a summation $(AB)_{ij} = \sum_k A_{ik}B_{kj}$. It is this that we use to calculate our product, with the query below being the natural translation.
+\paragraph{SQL Multiplication} Matrix multiplication can be written as a summation $(AB)_{ij} = \sum_k A_{ik}B_{kj}$. It is this that we use to calculate our product, with the query below being the natural translation. This translation allows us to take advantage of the parallelisation of SQL with little to no work on our part.
+
 
 \begin{lstlisting}[language=SQL]
 CREATE TABLE C AS
@@ -36,46 +45,110 @@ CREATE TABLE C AS
     GROUP BY A.i, B.j;
 \end{lstlisting}
 
-This translation allows us to take advantage of the parallelisation of SQL with little to no work on our part.
 
 
-\paragraph{Python Multiplication} For multiplying in Python we use NumPy's built in function. The workflow then becomes: download the matrices into NumPy arrays, compute the product, upload the new matrix to the SQL server.
+\paragraph{Python Multiplication} For multiplying in Python we use NumPy's built in function. For each test we download the matrices into NumPy arrays, compute the product, upload the new matrix to the SQL server.
 
 \paragraph{Simulated network delay} In many scenarios, the SQL server and the client device will not be on the same physical device (e.g. if we used a cloud database provider such as Amazon RDS for PostgreSQL), in this case we must move data across the internet. We also wish to investigate how this may change the relative speed of our approaches.
 
-A slow internet speed of 10Mbps was selected to simulate common scenarios with low internet speed such as a phone on mobile data or a device in an otherwise low connectivity environment (e.g. field work). This speed also has the advantage of making the result more pronounced meaning we can more easily analyse the effect of slow internet speed.
+A slow internet speed of 10Mbps was selected to simulate common scenarios with low internet speed, such as a phone on mobile data or field work in a low connectivity environment. This speed also has the advantage of making the result more pronounced meaning we can more easily see the effect of slow internet speed.
 
-We assume that we begin with the matrices already in the database and want to end up with the product also in the database. As such the Python approach is the only one that needs a delay as it downloads $A$ and $B$ and then uploads $(AB)$. Under our storage scheme we transfer all values regardless of sparsity, so the transferred payload is approximately the values of $A$, $B$, and $(AB)$, i.e.\ $\approx nm + mp + np$ floating point numbers. Approximating each stored value as a 64-bit double, the simulated transfer time is
-\[
-t_{\text{net}} \approx \frac{64(nm + mp + np)}{S \cdot 10^6},
-\]
-where $S$ is the link speed in Mbps. For convenience, in actuality, we also transfer the position $(i,j)$ of each value; we ignore this additional overhead (as well as protocol/serialization overheads) in the delay model.
+The Python approach is the only one that needs a delay as it downloads $A$ and $B$ and then uploads $(AB)$, while no substantial data transfers occur under SQL. Under our storage scheme we transfer all values regardless of sparsity, so the transferred payload is approximately the values of $A$, $B$, and $(AB)$, i.e.\ $\approx nm + mp + np$ floating point numbers. Approximating each stored value as a 64-bit double \cite{psql}, the simulated transfer time is
+
+$$t_{\text{delay}} = \beta (nm + mp + np)\qquad \beta:=\frac{64}{S \cdot 10^6}$$
+
+where $S$ is the internet speed in Mbps. For convenience, in actuality, we also transfer the position $(i,j)$ of each value; we ignore this additional overhead (as well as protocol/overheads) in the delay model. Ignoring these effects makes Python more competitive compared to SQL.
 
 \paragraph{Benchmarking}
-We benchmark square matrices with $n \in \{10, 100, 300, 500\}$ across several nonzero proportions $d$. We plot $\Delta t = t_{\text{Python}} - t_{\text{SQL}}$ averaged across three runs. As such $\Delta t > 0$ means SQL is faster, and $\Delta t < 0$ means Python is faster.
+We benchmark random square matrices with $n \in \{100, 300, 500, 700\}$ and  $d\in \{0.1, 0.3, 0.4, 0.5, 1\}$ . We plot $\Delta t = t_{\text{Py}} - t_{\text{SQL}}$ averaged across three runs. As such $\Delta t > 0$ means SQL is faster, and $\Delta t < 0$ means Python is faster. We use square matrices for simplicity only.
 
-\section{Results and Discussion}
+
+\section{Modelling}
+
+We expect matrix multiplication to take $O(n^3)$ time, where n is the size of the matrix. This is the approach that NumPy will take. We also add $O(n^2)$ time due to the simulated transfer cost. We therefore model the time taken as $\alpha n^3 + \beta n^2$ where $\alpha$ is an unknown constant and, since we are working with square matrices we abuse notation to say that, $\displaystyle\beta = \frac{192}{S \cdot 10^6}$.
+
+In contrast, SQL filters out all zeros before doing our multiplication so we do $O(n\times dn \times dn)$ work where $d$ is the density of non-zero entries. This is because, $P(a_{ik}\ne 0) = P(b_{kj}\ne0)=d\implies P(a_{ik}\ne0 \cap b_{kj}\ne 0)=d^2$ by independence. So we can model the time as $\gamma d^2 n^3$.
+
+Hence to find when SQL is faster we need to find when $\alpha n^3 + \beta n^2>\gamma d^2 n^3$ which is true when $\displaystyle d<d_\text{crit} = \sqrt{\frac{\alpha + \frac{\beta}{n}}{\gamma}}$ (since all quantities are positive by assumption). Now all that remains to be able to find this boundary concretely is the estimate the values of $\alpha, \gamma$.
+
+
+\subsection{Estimating constants}
+
+We estimate the constants using a linear regression model. See the proofs in the appendix for the formulae below.
+
+\begin{align*}
+    \hat\alpha &= \frac{\sum^N_{i=1} n^3 t_{\text{Py}}}{\sum^N_{i=1} n^6}\\
+    \mathrm{SE}(\hat\alpha) &= \sqrt{\frac{\sigma^2_\text{Py}}{\sum^N_{i=1} n^6}}\\
+    \sigma^2_\text{Py} &= \frac{1}{N-1} \sum ( t_{\text{py}} - \hat\alpha n^3)^2
+\end{align*}
+
+
+\begin{align*}
+    \hat\gamma &= \frac{\sum^N_{i=1} d^2n^3 t_{\text{SQL}}}{\sum^N_{i=1} d^4n^6}\\
+    \mathrm{SE}(\hat\gamma) &= \sqrt{\frac{\sigma^2_\text{sql}}{\sum^N_{i=1} d^4n^6}}\\
+    \sigma^2_\text{sql} &= \frac{1}{N-1} \sum ( t_{\text{SQL}} - \hat\gamma d^2n^3)^2
+\end{align*}
+
+\begin{center}
+\begin{tabular}{|c | c c c c|} 
+    \hline
+    Estimator & Estimate & SE & \% error & $95\%$ confidence interval \\ [0.5ex] 
+    \hline
+    $\hat \alpha$ & $7.969\times 10^{-8}$ & $2.444\times 10^{-9}$ & $3.066$ & $(7.490\times 10^{-8}, 8.448\times 10^{-8})$\\
+    $\hat \gamma$ & $6.178\times 10^{-7}$ & $1.614\times 10^{-8}$ & $2.613$ & $(5.861\times 10^{-7}, 6.494\times 10^{-7})$\\
+    \hline
+\end{tabular}
+\end{center}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{../graphs/alpha}
+    \caption{Plots of the time taken for Python and residuals as n varies}
+    \label{fig:alpha}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{../graphs/gamma}
+    \caption{Plots of the time taken for SQL and residuals as n varies}
+    \label{fig:gamma}
+\end{figure}
+
+Looking at the residuals and standard error, we see that our model is at least reasonable and does somewhat accurately model the data. That being said we can also see that residuals are not constant with the x-axis variable on both the $\alpha$ and $\gamma$ plots. This casts significant doubt on the foundations of our model. That being said, we will still accept it since it does have strong prediction power on the data we consider.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\linewidth]{../graphs/crit_density}
+    \caption{Plot of how $d_\text{crit}$ varies as $n$ varies} 
+    \label{fig:crit}
+\end{figure}
+
+When the density is less than $d_\text{crit}$ SQL will be faster, this corresponds to the region below the green boundary line in figure \ref{fig:crit}. Note that since we interpret $d_\text{crit}$ as a density, it only makes sense if $d_\text{crit} \in [0,1]$, so our model predicts that for $d<36$ there is no $n$ for which SQL can win.
+
+\section{Results}
 
 \begin{figure}[H]
     \centering
     \includegraphics[width=\linewidth]{../graphs/benchmark}
-    \caption{Difference in runtime between Python (NumPy) and SQL for matrix multiplication. $\Delta t > 0$ means SQL was faster than Python. The dashed line includes a simulated 10 Mbps connection penalty applied to the Python workflow.}
+    \caption{Difference in runtime between Python (NumPy) and SQL for matrix multiplication. $\Delta t > 0$ means SQL was faster than Python. The red line includes a simulated 10 Mbps connection penalty applied to the Python workflow. The green line shows what our model predicts.}
     \label{fig:benchmark}
 \end{figure}
 
 \subsection{Dense matrices}
 
 \begin{itemize}
-    \item At high densities (large nonzero proportion $d$), we see that Python outperforms SQL by a wide margin and this gap grows with matrix size. This is due to the highly optimised nature of the NumPy algorithms.
+    \item At high densities, we see that Python outperforms SQL by a wide margin and this gap grows with matrix size. This is due to the highly optimised nature of the NumPy algorithms.
     \item The simulated network connection makes little difference since the SQL approach is so slow.
+    \item We get strong agreement with our model (by eye) with it strongly tracking the red line.
 \end{itemize}
 
 
 \subsection{Sparse matrices}
 
 \begin{itemize}
-    \item At low densities (small nonzero proportion $d$), SQL becomes much faster as it can filter out most operations (since they are multiplication by $0$). NumPy, on the other hand, is still multiplying everything out so is slower.
+    \item At low densities, SQL becomes much faster as it can filter out most operations (since they are multiplication by $0$). NumPy, on the other hand, is still multiplying everything out so is slower.
     \item The delay now makes much more of a difference since the SQL approach is far more competitive and in fact wins as matrices become sparser (smaller $d$). This being said the absolute delay is the same, it is only relatively that this is changing.
+    \item We get much weaker agreement with our model (by eye) with it diverging from the red line, this suggests our model is weaker in this range.
 \end{itemize}
 
 \section{Future Work}
@@ -83,7 +156,38 @@ We benchmark square matrices with $n \in \{10, 100, 300, 500\}$ across several n
 Concrete next steps that would make this study stronger:
 \paragraph{True sparsity} at present, we store all values with no implied 0s, this is inefficient and increases the effect of the delay for sparse matrices.
 \paragraph{Larger n} test larger $n$ until we reach the limits of memory so that we must use disk storage, I hypothesize that this would further favour the SQL approach.
-\paragraph{Find the boundary} We do not know exactly where the boundary is between SQL or Python being faster as we vary sparsity.
+\paragraph{Structured matrices} Many applications of this result may use matrices that are not randomly dense i.e. the Bernoulli random mask that we applied may not be appropriate. For example, a page rank adjacency matrix would display large amounts of clustering. This may affect our results.
 \paragraph{Use GPU} Compare other libraries including those that enable GPU acceleration such as PyTorch
+\paragraph{Increase the number of runs} Increasing the number of runs would decrease the run-to-run variance of the estimates for $\alpha$ and $\gamma$.
+\paragraph{Non-square} Using non-square matrices (e.g. vectors for a dot product) could very meaningfully change our results but we have not considered this here. Square matrices are perhaps the most common in applications (e.g. Markov chains, adjacency matrices) hence we consider only these.
+\paragraph{Explore better models} We saw that our model's predictions did not track the observed data, particularly at lower densities. Other models, for example including lower order terms, could produce better results. It is interesting (though perhaps insignificant) that our model seems to lower bound the time; perhaps this suggests that it comes from us ignoring overhead in the transfer time.
+
+
+\section{Appendix: Proof of regression formulae}
+
+\paragraph{Claim:} $\displaystyle\hat\alpha = \frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}$
+\begin{align*}
+    S(\alpha) &:= \sum^N_{i=1} (y_i - \alpha x_i)^2\\
+    \hat \alpha &= \mathrm{argmin}~ S(\alpha)\\
+    \frac{\partial S(\alpha)}{\partial \alpha} &= -2\sum^N_{i=1} x_i(y_i-\alpha x_i)\\
+    0&= \sum^N_{i=1} x_i(y_i - \hat\alpha x_i)\\
+    \hat \alpha &=\frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}
+\end{align*}
+
+\paragraph{Claim:} $\displaystyle \mathrm{Var}(\hat\alpha) = \frac{\sigma^2}{\sum^N_{i=1} x_i^2}$
+
+\begin{align*}
+    \mathrm{Var}(\hat\alpha) &= \mathrm{Var}\left(\frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}\right)\\
+    &= \mathrm{Var}\left(\frac{\sum^N_{i=1} x_i (\alpha x_i +\epsilon_i)}{\sum^N_{i=1} x_i^2}\right)\\
+    &= \mathrm{Var}\left( \alpha +\frac{\sum^N_{i=1} x_i \epsilon_i}{\sum^N_{i=1} x_i^2}\right)\\
+    &= \frac{1}{(\sum^N_{i=1} x_i^2)^2}\mathrm{Var}\left(\sum^N_{i=1} x_i\epsilon_i\right)\\
+    &= \frac{1}{(\sum^N_{i=1} x_i^2)^2}\left(\sum^N_{i=1} x_i^2\mathrm{Var}(\epsilon_i)\right)\\
+    &=\frac{\sigma^2}{\sum^N_{i=1} x_i^2} \qquad \because \epsilon_i\sim N(0,\sigma^2) \text{ by assumption}
+\end{align*}
+
+Both claims are analogous for $\gamma$. 
+
+\bibliographystyle{plain}
+\bibliography{references}
 
 \end{document}
