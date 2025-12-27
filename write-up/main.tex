@@ -30,7 +30,7 @@ Our findings apply to the case where
 
 \section{Methodology}
 
-\paragraph{Matrix storage}We store each matrix in a new table. Each row of the table has three columns $(i:INT, j:INT, value:DOUBLE)$. For simplicity, we store \emph{all} entries of the matrix explicitly, including zeros (i.e.\ there are no implied 0s). This encoding is convenient but means the amount of data stored and transferred is independent of how sparse the matrix is.
+\paragraph{Matrix storage}We store each matrix in a new table. Each row of the table has three columns $(i:INT, j:INT, value:DOUBLE)$. If an entry is missing then it is an implied 0.
 
 \paragraph{Matrix generation}For each benchmark setting we generate matrices in NumPy by sampling i.i.d.\ entries from a uniform distribution on $[0,1)$. We then apply an elementwise Bernoulli mask with parameter $d$ (the \emph{non-zero proportion}), each entry is kept with probability $d$ and set to $0$ otherwise. To increase speed we only randomly generate the largest size matrix and then truncate it to the top left corner as we need smaller matrices. Using this approach we need only generate new matrices for each repeat of the experiment and for each density.
 
@@ -57,7 +57,7 @@ The Python approach is the only one that needs a delay as it downloads $A$ and $
 
 $$t_{\text{delay}} = \beta (nm + mp + np)\qquad \beta:=\frac{64}{S \cdot 10^6}$$
 
-where $S$ is the internet speed in Mbps. For convenience, in actuality, we also transfer the position $(i,j)$ of each value; we ignore this additional overhead (as well as protocol/overheads) in the delay model. Ignoring these effects makes Python more competitive compared to SQL.
+where $S$ is the internet speed in Mbps. For convenience, in actuality, we also transfer the position $(i,j)$ of each value; we ignore this additional overhead (as well as protocol/overheads) in the delay model. Ignoring these effects makes Python more competitive compared to SQL. We also do not change the delay with varying matrix density.
 
 \paragraph{Benchmarking}
 We benchmark random square matrices with $n \in \{100, 300, 500, 700\}$ and  $d\in \{0.1, 0.3, 0.4, 0.5, 1\}$ . We plot $\Delta t = t_{\text{Py}} - t_{\text{SQL}}$ averaged across three runs. As such $\Delta t > 0$ means SQL is faster, and $\Delta t < 0$ means Python is faster. We use square matrices for simplicity only.
@@ -89,13 +89,14 @@ We estimate the constants using a linear regression model. See the proofs in the
     \sigma^2_\text{sql} &= \frac{1}{N-1} \sum ( t_{\text{SQL}} - \hat\gamma d^2n^3)^2
 \end{align*}
 
+
 \begin{center}
 \begin{tabular}{|c | c c c c|} 
     \hline
     Estimator & Estimate & SE & \% error & $95\%$ confidence interval \\ [0.5ex] 
     \hline
-    $\hat \alpha$ & $7.969\times 10^{-8}$ & $2.444\times 10^{-9}$ & $3.066$ & $(7.490\times 10^{-8}, 8.448\times 10^{-8})$\\
-    $\hat \gamma$ & $6.178\times 10^{-7}$ & $1.614\times 10^{-8}$ & $2.613$ & $(5.861\times 10^{-7}, 6.494\times 10^{-7})$\\
+    $\hat \alpha$ & $4.440\times 10^{-8}$ & $2.388\times 10^{-9}$ & $5.379$ & $(3.972\times 10^{-8}, 4.908\times 10^{-8})$\\
+    $\hat \gamma$ & $4.702\times 10^{-7}$ & $1.269\times 10^{-8}$ & $2.698$ & $(4.454\times 10^{-7}, 4.951\times 10^{-7})$\\
     \hline
 \end{tabular}
 \end{center}
@@ -154,13 +155,12 @@ When the density is less than $d_\text{crit}$ SQL will be faster, this correspon
 \section{Future Work}
 
 Concrete next steps that would make this study stronger:
-\paragraph{True sparsity} at present, we store all values with no implied 0s, this is inefficient and increases the effect of the delay for sparse matrices.
-\paragraph{Larger n} test larger $n$ until we reach the limits of memory so that we must use disk storage, I hypothesize that this would further favour the SQL approach.
-\paragraph{Structured matrices} Many applications of this result may use matrices that are not randomly dense i.e. the Bernoulli random mask that we applied may not be appropriate. For example, a page rank adjacency matrix would display large amounts of clustering. This may affect our results.
-\paragraph{Use GPU} Compare other libraries including those that enable GPU acceleration such as PyTorch
-\paragraph{Increase the number of runs} Increasing the number of runs would decrease the run-to-run variance of the estimates for $\alpha$ and $\gamma$.
-\paragraph{Non-square} Using non-square matrices (e.g. vectors for a dot product) could very meaningfully change our results but we have not considered this here. Square matrices are perhaps the most common in applications (e.g. Markov chains, adjacency matrices) hence we consider only these.
-\paragraph{Explore better models} We saw that our model's predictions did not track the observed data, particularly at lower densities. Other models, for example including lower order terms, could produce better results. It is interesting (though perhaps insignificant) that our model seems to lower bound the time; perhaps this suggests that it comes from us ignoring overhead in the transfer time.
+\paragraph{Larger n} test larger $n$ until we reach the limits of memory so that we must use disk storage, I hypothesize that this would further favour the SQL approach
+\paragraph{Structured matrices} Many applications of this result may use matrices that are not randomly dense i.e. the Bernoulli random mask that we applied may not be appropriate. For example, a page rank adjacency matrix would display large amounts of clustering. This may affect our results
+\paragraph{Use a GPU} Compare other libraries including those that enable GPU acceleration such as PyTorch
+\paragraph{Increase the number of runs} Increasing the number of runs would decrease the run-to-run variance of the estimates for $\alpha$ and $\gamma$
+\paragraph{Non-square} Using non-square matrices (e.g. vectors for a dot product) could very meaningfully change our results but we have not considered this here. Square matrices are perhaps the most common in applications (e.g. Markov chains, adjacency matrices, PCA etc) hence we consider only these
+\paragraph{Explore better models} We saw that our model's predictions did not track the observed data, particularly at lower densities. Other models, for example including lower order terms, could produce better results. It is interesting (though perhaps insignificant) that our model seems to lower bound the time; perhaps this suggests that it comes from us ignoring overhead in the transfer time
 
 
 \section{Appendix: Proof of regression formulae}
