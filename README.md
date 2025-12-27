@@ -9,10 +9,8 @@ This project shows how to store, validate, display, and multiply matrices inside
 
 | File | Description |
 |------|-------------|
-| **[0create.sql](sql/0create.sql)** | Creates table `A` and inserts a sample matrix |
-| **[1check.sql](sql/1check.sql)** | Defines `mat_check(text)` to verify matrix completeness and index correctness |
-| **[2visualise.sql](sql/2visualise.sql)** | Defines `mat_vis(text)` to print each matrix row as a text string |
-| **[3multiply.sql](sql/3multiply.sql)** | Defines `mat_mul(text, text, text)` for matrix multiplication |
+| **[create.sql](sql/0create.sql)** | Creates table `A` and inserts a sample matrix |
+| **[multiply.sql](sql/3multiply.sql)** | Defines `mat_mul(text, text, text)` for matrix multiplication |
 | **[benchmark.ipynb](benchmark.ipynb)** | Benchmarks the SQL approach against the Python approach |
 | **[main.pdf](write-up/main.pdf)** | The write up for the project |
 
@@ -23,10 +21,8 @@ createdb linalg
 ```
 
 ```bash
-psql -U postgres -d linalg -f ./sql/0create.sql
-psql -U postgres -d linalg -f ./sql/1check.sql
-psql -U postgres -d linalg -f ./sql/2visualise.sql
-psql -U postgres -d linalg -f ./sql/3multiply.sql
+psql -U postgres -d linalg -f ./sql/create.sql
+psql -U postgres -d linalg -f ./sql/multiply.sql
 ```
 
 ```bash
