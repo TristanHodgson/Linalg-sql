@@ -8,3 +8,5 @@ write-up/main.out
 write-up/main.synctex.gz
 write-up/main.log
 write-up/main.s*
+.python-version
+todo.md

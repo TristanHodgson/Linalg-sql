@@ -21,9 +21,3 @@ BEGIN
     EXECUTE format('ALTER TABLE %s ADD PRIMARY KEY (i, j);', C);
 END;
 $$;
-
-
-
-SELECT matrix FROM mat_vis('a');
-SELECT mat_mul('a','a','b');
-SELECT matrix FROM mat_vis('b');

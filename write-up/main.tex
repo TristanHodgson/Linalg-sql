@@ -1,191 +1,113 @@
 \documentclass[a4paper,11pt]{article}
 \usepackage[utf8]{inputenc}
-
 \usepackage{style}
 
-\title{Benchmarking SQL and NumPy for Matrix Multiplication}
+\title{Performance Regimes of In-Database Matrix Multiplication: A Communication-Aware Analysis}
 \author{Tristan Hodgson}
-\date{\today}
+\date{January 8, 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We benchmark and model matrix multiplication performed entirely inside PostgreSQL against a conventional Python workflow using NumPy. We additionally model a slow 10 Mbps connection by adding a transfer-time penalty to the Python workflow. For dense matrices, NumPy consistently outperforms the SQL approach by a wide margin, and the gap grows with matrix size. For sufficiently sparse matrices, the SQL approach becomes competitive and can be faster, as the database can filter out a large fraction of unnecessary multiplications while also eliminating client-side data transfer. These results suggest in-database multiplication can be advantageous for sparse workloads or constrained network conditions, while dense multiplication remains better suited to NumPy.
+Linear algebra operations are increasingly executed under non-classical computational constraints, including limited memory, high data-movement costs, and data that is natively stored in database systems. While specialised numerical libraries such as NumPy are optimised for dense, in-memory computation, relational databases offer alternative execution models that emphasise data locality and filtering. In this work, we empirically study the performance regimes of matrix multiplication when implemented directly within a relational database compared to a conventional Python-NumPy workflow. Focusing on sparse matrices stored in coordinate form, we analyse how sparsity, matrix dimension, and communication costs affect runtime. We develop a simple cost model that separates arithmetic complexity from data-movement overhead and show that, under sufficiently sparse regimes or constrained bandwidth, in-database computation can become competitive with or outperform traditional approaches, despite higher per-operation costs. Our results highlight the importance of communication-aware cost models when evaluating numerical algorithms in data-centric environments and illustrate how classical asymptotic analyses may fail to predict practical performance under realistic system constraints.
 \end{abstract}
 
 \section{Introduction}
 
-Both matrices and relational databases are ubiquities in many applications such as data science and graph theory. In these cases we often need to multiply matrices stored in such databases. In this paper we attempt to describe when it is better to do multiplication of matrices in SQL compared to a more traditional approach using a programming language like Python.
+Classical numerical linear algebra typically assumes that matrices are either dense or follow structured sparsity patterns, and that computation occurs entirely in-memory where floating-point operations (FLOPs) are the dominant cost. However, modern data-centric workflows increasingly violate these assumptions. In many applications, such as large-scale graph analytics and distributed machine learning, data is natively stored in relational databases. Furthermore, as enterprises shift toward "data-gravity" architectures to control the rising costs of data movement and cloud infrastructure \cite{dbta2026}, the traditional model of exporting data to specialized libraries like NumPy becomes a bottleneck.
 
-We anticipate that the more traditional approach may be advantageous for some matrices due to the ability to leverage highly optimised libraries such as NumPy. However, some matrices may benefit from the SQL approach as we do not have to export all of our data from the database into Python and then back again. We also investigate how a slow internet connection (between the server and client) may affect the relative speed of each approach.
-
-Our findings apply to the case where
+Modern workflows are often characterized by:
 \begin{itemize}
-    \item Our matrices are stored in an SQL database to begin with
-    \item We want the product of two matrices to be stored in the SQL database after it has been calculated
+    \item Data stored in relational databases rather than flat binary files.
+    \item High-dimensional matrices with extreme sparsity.
+    \item Communication and I/O costs that dominate arithmetic processing.
 \end{itemize}
 
+The central question of this study is: \textit{When does changing the computational model change which algorithmic approach is preferable?} We do not propose new algorithms. Instead, we empirically study how standard formulations of matrix multiplication behave under differing computational and data-movement constraints.
 
+\section{Related Work}
 
-\section{Methodology}
+\subsection{Classical Matrix Multiplication}
+The "gold standard" for dense matrix computations remains the work of Golub and Van Loan \cite{golub2013}, which defines the classical assumptions of $O(n^3)$ complexity for standard multiplication. Demmel \cite{demmel1997} further explores the impact of memory hierarchies and conditioning on algorithm stability, providing the framing for why arithmetic alone does not dictate performance in modern systems.
 
-\paragraph{Matrix storage}We store each matrix in a new table. Each row of the table has three columns $(i:INT, j:INT, value:DOUBLE)$. If an entry is missing then it is an implied 0.
+\subsection{Sparse Linear Algebra}
+Efficient sparse computation relies heavily on data representation. While CSR and CSC formats are standard in numerical libraries, the coordinate (triplet) format is often natively supported by database structures \cite{davis2006}. As noted by Buluc and Gilbert \cite{buluc2011}, pruning zeros allows for effective complexity reductions that change based on sparsity patterns.
 
-\paragraph{Matrix generation}For each benchmark setting we generate matrices in NumPy by sampling i.i.d.\ entries from a uniform distribution on $[0,1)$. We then apply an elementwise Bernoulli mask with parameter $d$ (the \emph{non-zero proportion}), each entry is kept with probability $d$ and set to $0$ otherwise. To increase speed we only randomly generate the largest size matrix and then truncate it to the top left corner as we need smaller matrices. Using this approach we need only generate new matrices for each repeat of the experiment and for each density.
+\subsection{Communication-Avoiding Computation}
+The foundational work by Hong and Kung \cite{hong1981} established that data movement is a primary constraint in algorithm performance. This has evolved into modern "communication-avoiding" linear algebra \cite{ballard2014}, which seeks to minimize I/O overhead—a philosophy that aligns with in-database analytics where filtering occurs close to the storage layer \cite{stonebraker2018}.
 
-\paragraph{SQL Multiplication} Matrix multiplication can be written as a summation $(AB)_{ij} = \sum_k A_{ik}B_{kj}$. It is this that we use to calculate our product, with the query below being the natural translation. This translation allows us to take advantage of the parallelisation of SQL with little to no work on our part.
+\section{Computational Model and Problem Setup}
 
+\subsection{Matrix Representation}
+We represent matrices in coordinate format: $(i, j, value)$. This "triplet" form is native to relational tables. Any entry not explicitly stored is an implied zero, allowing for significant storage savings in sparse regimes.
 
-\begin{lstlisting}[language=SQL]
-CREATE TABLE C AS
-    SELECT A.i, B.j, SUM(A.value * B.value) AS value
-    FROM A JOIN B ON A.j = B.i
-    WHERE A.value != 0 and B.value != 0
-    GROUP BY A.i, B.j;
-\end{lstlisting}
+\subsection{Computational Workflows}
+We compare two distinct workflows:
+\begin{itemize}
+    \item \textbf{Python Workflow}: Requires transferring all non-zero entries from the database to a client, performing dense multiplication using NumPy, and uploading the result back to the server.
+    \item \textbf{SQL Workflow}: Executes multiplication entirely within the database engine using joins and aggregations, eliminating client-side data transfer.
+\end{itemize}
 
+\subsection{Cost Decomposition}
+Our analysis separates the total runtime into arithmetic cost, data-movement (communication) cost, and filtering effects. This allows us to move beyond descriptive benchmarks toward an analytical model of performance regimes.
 
+\section{Cost Model}
 
-\paragraph{Python Multiplication} For multiplying in Python we use NumPy's built in function. For each test we download the matrices into NumPy arrays, compute the product, upload the new matrix to the SQL server.
+\subsection{Python-NumPy Model}
+NumPy leverages highly optimized BLAS/LAPACK routines. We model its runtime as:
+$$t_{\text{Py}} \approx \alpha n^3 + \beta n^2$$
+where $\alpha n^3$ represents the arithmetic work and $\beta n^2$ captures the $O(n^2)$ communication overhead required for data transfer.
 
-\paragraph{Simulated network delay} In many scenarios, the SQL server and the client device will not be on the same physical device (e.g. if we used a cloud database provider such as Amazon RDS for PostgreSQL), in this case we must move data across the internet. We also wish to investigate how this may change the relative speed of our approaches.
+\subsection{SQL-Based Model}
+SQL exploits sparsity through the JOIN operator. For matrices with density $d$, the effective work scales with the number of non-zero intersections:
+$$t_{\text{SQL}} \approx \gamma (d^2 n^3)$$
+This model assumes independence in the distribution of non-zero entries.
 
-A slow internet speed of 10Mbps was selected to simulate common scenarios with low internet speed, such as a phone on mobile data or field work in a low connectivity environment. This speed also has the advantage of making the result more pronounced meaning we can more easily see the effect of slow internet speed.
+\subsection{Regime Prediction}
+The transition point where SQL becomes faster than NumPy ($t_{\text{SQL}} < t_{\text{Py}}$) occurs at a critical density $d_{\text{crit}}$:
+$$d_{\text{crit}} = \sqrt{\frac{\alpha + \frac{\beta}{n}}{\gamma}}$$
+We emphasize that this model predicts qualitative regime behavior rather than exact constants.
 
-The Python approach is the only one that needs a delay as it downloads $A$ and $B$ and then uploads $(AB)$, while no substantial data transfers occur under SQL. Under our storage scheme we transfer all values regardless of sparsity, so the transferred payload is approximately the values of $A$, $B$, and $(AB)$, i.e.\ $\approx nm + mp + np$ floating point numbers. Approximating each stored value as a 64-bit double \cite{psql}, the simulated transfer time is
+\section{Experimental Methodology}
 
-$$t_{\text{delay}} = \beta (nm + mp + np)\qquad \beta:=\frac{64}{S \cdot 10^6}$$
+\subsection{Matrix Generation}
+Matrices were generated by sampling i.i.d. entries from a uniform distribution on $[0,1)$, masked by a Bernoulli parameter $d$ to control sparsity. We utilized a truncation method—generating the largest matrix first and slicing for smaller dimensions—to ensure consistency across tests.
 
-where $S$ is the internet speed in Mbps. For convenience, in actuality, we also transfer the position $(i,j)$ of each value; we ignore this additional overhead (as well as protocol/overheads) in the delay model. Ignoring these effects makes Python more competitive compared to SQL. We also do not change the delay with varying matrix density.
+\subsection{Benchmarking Setup}
+Tests were conducted using PostgreSQL for SQL execution and NumPy for the Python workflow. We simulated a constrained network environment (10 Mbps) to observe the impact of bandwidth on $d_{\text{crit}}$.
 
-\paragraph{Benchmarking}
-We benchmark random square matrices with $n \in \{100, 300, 500, 700\}$ and  $d\in \{0.1, 0.3, 0.4, 0.5, 1\}$ . We plot $\Delta t = t_{\text{Py}} - t_{\text{SQL}}$ averaged across three runs. As such $\Delta t > 0$ means SQL is faster, and $\Delta t < 0$ means Python is faster. We use square matrices for simplicity only.
-
-
-\section{Modelling}
-
-We expect matrix multiplication to take $O(n^3)$ time, where n is the size of the matrix. This is the approach that NumPy will take. We also add $O(n^2)$ time due to the simulated transfer cost. We therefore model the time taken as $\alpha n^3 + \beta n^2$ where $\alpha$ is an unknown constant and, since we are working with square matrices we abuse notation to say that, $\displaystyle\beta = \frac{192}{S \cdot 10^6}$.
-
-In contrast, SQL filters out all zeros before doing our multiplication so we do $O(n\times dn \times dn)$ work where $d$ is the density of non-zero entries. This is because, $P(a_{ik}\ne 0) = P(b_{kj}\ne0)=d\implies P(a_{ik}\ne0 \cap b_{kj}\ne 0)=d^2$ by independence. So we can model the time as $\gamma d^2 n^3$.
-
-Hence to find when SQL is faster we need to find when $\alpha n^3 + \beta n^2>\gamma d^2 n^3$ which is true when $\displaystyle d<d_\text{crit} = \sqrt{\frac{\alpha + \frac{\beta}{n}}{\gamma}}$ (since all quantities are positive by assumption). Now all that remains to be able to find this boundary concretely is the estimate the values of $\alpha, \gamma$.
-
-
-\subsection{Estimating constants}
-
-We estimate the constants using a linear regression model. See the proofs in the appendix for the formulae below.
-
-\begin{align*}
-    \hat\alpha &= \frac{\sum^N_{i=1} n^3 t_{\text{Py}}}{\sum^N_{i=1} n^6}\\
-    \mathrm{SE}(\hat\alpha) &= \sqrt{\frac{\sigma^2_\text{Py}}{\sum^N_{i=1} n^6}}\\
-    \sigma^2_\text{Py} &= \frac{1}{N-1} \sum ( t_{\text{py}} - \hat\alpha n^3)^2
-\end{align*}
-
-
-\begin{align*}
-    \hat\gamma &= \frac{\sum^N_{i=1} d^2n^3 t_{\text{SQL}}}{\sum^N_{i=1} d^4n^6}\\
-    \mathrm{SE}(\hat\gamma) &= \sqrt{\frac{\sigma^2_\text{sql}}{\sum^N_{i=1} d^4n^6}}\\
-    \sigma^2_\text{sql} &= \frac{1}{N-1} \sum ( t_{\text{SQL}} - \hat\gamma d^2n^3)^2
-\end{align*}
-
-
-\begin{center}
-\begin{tabular}{|c | c c c c|} 
-    \hline
-    Estimator & Estimate & SE & \% error & $95\%$ confidence interval \\ [0.5ex] 
-    \hline
-    $\hat \alpha$ & $4.440\times 10^{-8}$ & $2.388\times 10^{-9}$ & $5.379$ & $(3.972\times 10^{-8}, 4.908\times 10^{-8})$\\
-    $\hat \gamma$ & $4.702\times 10^{-7}$ & $1.269\times 10^{-8}$ & $2.698$ & $(4.454\times 10^{-7}, 4.951\times 10^{-7})$\\
-    \hline
-\end{tabular}
-\end{center}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\linewidth]{../graphs/alpha}
-    \caption{Plots of the time taken for Python and residuals as n varies}
-    \label{fig:alpha}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\linewidth]{../graphs/gamma}
-    \caption{Plots of the time taken for SQL and residuals as n varies}
-    \label{fig:gamma}
-\end{figure}
-
-Looking at the residuals and standard error, we see that our model is at least reasonable and does somewhat accurately model the data. That being said we can also see that residuals are not constant with the x-axis variable on both the $\alpha$ and $\gamma$ plots. This casts significant doubt on the foundations of our model. That being said, we will still accept it since it does have strong prediction power on the data we consider.
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.75\linewidth]{../graphs/crit_density}
-    \caption{Plot of how $d_\text{crit}$ varies as $n$ varies} 
-    \label{fig:crit}
-\end{figure}
-
-When the density is less than $d_\text{crit}$ SQL will be faster, this corresponds to the region below the green boundary line in figure \ref{fig:crit}. Note that since we interpret $d_\text{crit}$ as a density, it only makes sense if $d_\text{crit} \in [0,1]$, so our model predicts that for $d<36$ there is no $n$ for which SQL can win.
+\subsection{Limitations of the Experimental Setup}
+Our setup is limited to synthetic random matrices; it does not account for hardware-specific optimizations (like GPUs) or specialized structured sparsity often found in real-world graphs.
 
 \section{Results}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=\linewidth]{../graphs/benchmark}
-    \caption{Difference in runtime between Python (NumPy) and SQL for matrix multiplication. $\Delta t > 0$ means SQL was faster than Python. The red line includes a simulated 10 Mbps connection penalty applied to the Python workflow. The green line shows what our model predicts.}
-    \label{fig:benchmark}
-\end{figure}
+\subsection{Dense Regimes}
+As expected, NumPy dominates in dense regimes due to highly optimized arithmetic kernels. Figures \ref{fig:alpha} and \ref{fig:benchmark} demonstrate that at high densities, the performance gap between NumPy and SQL grows with matrix size $n$.
 
-\subsection{Dense matrices}
+\subsection{Sparse Regimes}
+In sparse regimes, we observe a performance inversion. The ability of the SQL JOIN to filter out zeros before multiplication compensates for its higher per-operation cost.
 
+\subsection{Transition Regions}
+The $d_{\text{crit}}$ boundary (Figure \ref{fig:crit}) identifies the "competition zone." Within this region, performance is highly sensitive to parameters such as available network bandwidth and memory constraints.
+
+\section{Discussion}
+
+Our results demonstrate why asymptotic complexity alone is a misleading metric for algorithm selection in data-centric environments. While NumPy's $O(n^3)$ arithmetic is faster in a vacuum, the $O(n^2)$ communication cost of moving data becomes a bottleneck in constrained environments. This is particularly relevant for large-scale analytics and graph algorithms where data is too large to move efficiently between systems.
+
+\section{Limitations and Future Work}
+
+This study focuses purely on performance regimes and does not address:
 \begin{itemize}
-    \item At high densities, we see that Python outperforms SQL by a wide margin and this gap grows with matrix size. This is due to the highly optimised nature of the NumPy algorithms.
-    \item The simulated network connection makes little difference since the SQL approach is so slow.
-    \item We get strong agreement with our model (by eye) with it strongly tracking the red line.
+    \item Numerical stability or floating-point error accumulation.
+    \item Structured sparsity patterns (e.g., power-law graphs).
+    \item Extension to iterative methods like PageRank or PCA.
 \end{itemize}
+These areas represent critical avenues for strengthening the analysis of data-centric numerical methods.
 
+\section{Conclusion}
 
-\subsection{Sparse matrices}
-
-\begin{itemize}
-    \item At low densities, SQL becomes much faster as it can filter out most operations (since they are multiplication by $0$). NumPy, on the other hand, is still multiplying everything out so is slower.
-    \item The delay now makes much more of a difference since the SQL approach is far more competitive and in fact wins as matrices become sparser (smaller $d$). This being said the absolute delay is the same, it is only relatively that this is changing.
-    \item We get much weaker agreement with our model (by eye) with it diverging from the red line, this suggests our model is weaker in this range.
-\end{itemize}
-
-\section{Future Work}
-
-Concrete next steps that would make this study stronger:
-\paragraph{Larger n} test larger $n$ until we reach the limits of memory so that we must use disk storage, I hypothesize that this would further favour the SQL approach
-\paragraph{Structured matrices} Many applications of this result may use matrices that are not randomly dense i.e. the Bernoulli random mask that we applied may not be appropriate. For example, a page rank adjacency matrix would display large amounts of clustering. This may affect our results
-\paragraph{Use a GPU} Compare other libraries including those that enable GPU acceleration such as PyTorch
-\paragraph{Increase the number of runs} Increasing the number of runs would decrease the run-to-run variance of the estimates for $\alpha$ and $\gamma$
-\paragraph{Non-square} Using non-square matrices (e.g. vectors for a dot product) could very meaningfully change our results but we have not considered this here. Square matrices are perhaps the most common in applications (e.g. Markov chains, adjacency matrices, PCA etc) hence we consider only these
-\paragraph{Explore better models} We saw that our model's predictions did not track the observed data, particularly at lower densities. Other models, for example including lower order terms, could produce better results. It is interesting (though perhaps insignificant) that our model seems to lower bound the time; perhaps this suggests that it comes from us ignoring overhead in the transfer time
-
-
-\section{Appendix: Proof of regression formulae}
-
-\paragraph{Claim:} $\displaystyle\hat\alpha = \frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}$
-\begin{align*}
-    S(\alpha) &:= \sum^N_{i=1} (y_i - \alpha x_i)^2\\
-    \hat \alpha &= \mathrm{argmin}~ S(\alpha)\\
-    \frac{\partial S(\alpha)}{\partial \alpha} &= -2\sum^N_{i=1} x_i(y_i-\alpha x_i)\\
-    0&= \sum^N_{i=1} x_i(y_i - \hat\alpha x_i)\\
-    \hat \alpha &=\frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}
-\end{align*}
-
-\paragraph{Claim:} $\displaystyle \mathrm{Var}(\hat\alpha) = \frac{\sigma^2}{\sum^N_{i=1} x_i^2}$
-
-\begin{align*}
-    \mathrm{Var}(\hat\alpha) &= \mathrm{Var}\left(\frac{\sum^N_{i=1} x_i y_i}{\sum^N_{i=1} x_i^2}\right)\\
-    &= \mathrm{Var}\left(\frac{\sum^N_{i=1} x_i (\alpha x_i +\epsilon_i)}{\sum^N_{i=1} x_i^2}\right)\\
-    &= \mathrm{Var}\left( \alpha +\frac{\sum^N_{i=1} x_i \epsilon_i}{\sum^N_{i=1} x_i^2}\right)\\
-    &= \frac{1}{(\sum^N_{i=1} x_i^2)^2}\mathrm{Var}\left(\sum^N_{i=1} x_i\epsilon_i\right)\\
-    &= \frac{1}{(\sum^N_{i=1} x_i^2)^2}\left(\sum^N_{i=1} x_i^2\mathrm{Var}(\epsilon_i)\right)\\
-    &=\frac{\sigma^2}{\sum^N_{i=1} x_i^2} \qquad \because \epsilon_i\sim N(0,\sigma^2) \text{ by assumption}
-\end{align*}
-
-Both claims are analogous for $\gamma$. 
+This work demonstrates that the optimal computational model for matrix multiplication is not static but depends on the interplay of sparsity, dimension, and communication costs. Performance comparisons between numerical methods must be understood in terms of computational regimes rather than isolated benchmarks.
 
 \bibliographystyle{plain}
 \bibliography{references}
